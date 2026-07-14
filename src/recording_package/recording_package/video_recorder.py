@@ -25,19 +25,29 @@ class VideoRecorder(Node):
 
         self.declare_parameter("image_topic", "/camera/camera/color/image_raw")
         self.declare_parameter("command_topic", "/recording/command")
+        self.declare_parameter("status_topic", "~/status")
+        self.declare_parameter("start_service", "~/start")
+        self.declare_parameter("stop_service", "~/stop")
+        self.declare_parameter("set_recording_service", "~/set_recording")
         self.declare_parameter("output_dir", "~/recordings")
         self.declare_parameter("container", "mp4")
         self.declare_parameter("codec", "mp4v")
         self.declare_parameter("fps", 30.0)
         self.declare_parameter("filename_prefix", "camera")
+        self.declare_parameter("auto_start", False)
 
         self.image_topic = self.get_parameter("image_topic").value
         self.command_topic = self.get_parameter("command_topic").value
+        self.status_topic = self.get_parameter("status_topic").value
+        self.start_service = self.get_parameter("start_service").value
+        self.stop_service = self.get_parameter("stop_service").value
+        self.set_recording_service = self.get_parameter("set_recording_service").value
         self.output_dir = os.path.expanduser(self.get_parameter("output_dir").value)
         self.container = self.get_parameter("container").value.lower().lstrip(".")
         self.codec = self.get_parameter("codec").value
         self.fps = float(self.get_parameter("fps").value)
         self.filename_prefix = self.get_parameter("filename_prefix").value
+        self.auto_start = bool(self.get_parameter("auto_start").value)
 
         self.bridge = CvBridge()
         self.lock = threading.Lock()
@@ -47,17 +57,25 @@ class VideoRecorder(Node):
         self.recording = False
         self.frames_written = 0
 
-        self.status_pub = self.create_publisher(String, "/recording/status", 10)
+        self.status_pub = self.create_publisher(String, self.status_topic, 10)
         self.create_subscription(Image, self.image_topic, self.on_image, 10)
         self.create_subscription(String, self.command_topic, self.on_command, 10)
-        self.create_service(SetBool, "/recording/set_recording", self.on_set_recording)
-        self.create_service(Trigger, "/recording/start", self.on_start)
-        self.create_service(Trigger, "/recording/stop", self.on_stop)
+        self.create_service(SetBool, self.set_recording_service, self.on_set_recording)
+        self.create_service(Trigger, self.start_service, self.on_start)
+        self.create_service(Trigger, self.stop_service, self.on_stop)
 
         self.get_logger().info(f"Image topic: {self.image_topic}")
         self.get_logger().info(f"Command topic: {self.command_topic}")
-        self.get_logger().info("Use command 'start' or 'stop', or services /recording/start and /recording/stop")
+        self.get_logger().info(f"Status topic: {self.status_topic}")
+        self.get_logger().info(f"Output prefix: {self.filename_prefix}")
         self.publish_status("idle")
+
+        if self.auto_start:
+            ok, text = self.start_recording()
+            if ok:
+                self.get_logger().info(text)
+            else:
+                self.get_logger().warn(text)
 
     def publish_status(self, text):
         msg = String()
